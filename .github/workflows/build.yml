@@ -54,15 +54,31 @@ jobs:
             dist/*.deb
           if-no-files-found: error
 
+  # Publishes a release on a v* tag, or when the workflow is run by hand on main
+  # (the tag is then created from the version in package.json).
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.version.outputs.tag }}
+          name: Ma Licence ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: artifacts/*
+          fail_on_unmatched_files: true
+          body: |
+            Télécharge le fichier de ton ordinateur ci-dessous :
+            - **Windows** : `Ma-Licence-Setup-….exe`
+            - **Mac M1/M2/M3/M4** : le `.dmg` qui finit par `arm64` ; **Mac Intel** : celui qui finit par `x64`
+            - **Linux** : `.AppImage` ou `.deb`
+
+            Premier lancement : sur Windows, « Informations complémentaires », puis « Exécuter quand même ». Sur Mac, si l'appli est déclarée endommagée : `xattr -cr "/Applications/Ma Licence.app"` dans le Terminal.
