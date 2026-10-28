@@ -12,6 +12,88 @@ const STOP_WORDS = new Set(
   'cours licence pour dans avec introduction groupe annee semestre partie parties travaux diriges pratiques general generale generales principes fondamentaux module modules notions bases elements initiation approfondissement analyse methodes methodologie projet atelier option options seminaire'.split(' ')
 );
 
+// Course codes such as "UL1PY001" or "L2-ECO-301": letters and digits, no spaces.
+const COURSE_CODE_RE = /^[A-Z]{1,6}[-_ ]?\d[A-Z0-9_-]*$/i;
+
+function isCourseCode(s) {
+  const t = String(s || '').trim();
+  return t.length >= 4 && !/\s/.test(t) && /\d/.test(t) && COURSE_CODE_RE.test(t);
+}
+
+/** A name a student understands: "Introduction à la psychologie" rather than "UL1PY001". */
+function readableCourseName(c) {
+  if (!c) return '';
+  const full = String(c.fullName || '').trim();
+  const short = String(c.shortName || '').trim();
+  // "UL1PY001 - Introduction à la psychologie" → "Introduction à la psychologie"
+  const cleaned = full.replace(/^\s*[A-Z0-9][A-Z0-9_.-]{3,}\s*[-–:|]\s*/i, (m) => (isCourseCode(m.replace(/[-–:|\s]+$/, '')) ? '' : m)).trim();
+  if (!short || isCourseCode(short)) return cleaned || full || short;
+  return short.length <= 30 ? short : cleaned || short;
+}
+
+const SHORT_TITLES = {
+  exam: [
+    [/\bpartiels?\b/i, 'Partiel'],
+    [/\bexamen terminal\b/i, 'Examen terminal'],
+    [/\b(CC|DS|DST|CT)\s?(\d+)\b/, (m) => `${m[1].toUpperCase()}${m[2]}`],
+    [/\bcontr[ôo]le continu\b|\bCC\b/i, 'Contrôle continu'],
+    [/\bQCM\b/i, 'QCM'],
+    [/\binterro(gation)?s?\b/i, 'Interrogation'],
+    [/\bsoutenances?\b/i, 'Soutenance'],
+    [/\boral\b|\boraux\b/i, 'Oral'],
+    [/\btest/i, 'Test'],
+    [/\bexamens?\b|\bépreuves?\b/i, 'Examen'],
+  ],
+  deadline: [
+    [/\bcomptes?[- ]rendus?\b/i, 'Rendre le compte rendu'],
+    [/\bdossiers?\b/i, 'Rendre le dossier'],
+    [/\bDM\b|\bdevoirs? maison\b/i, 'Rendre le DM'],
+    [/\brapports?\b/i, 'Rendre le rapport'],
+    [/\bprojets?\b/i, 'Rendre le projet'],
+    [/\bexposés?\b/i, 'Exposé'],
+    [/\bmémoires?\b/i, 'Rendre le mémoire'],
+    [/\bdevoirs?\b/i, 'Rendre le devoir'],
+  ],
+  info: [
+    [/annul/i, 'Cours annulé'],
+    [/report|déplac|deplac/i, 'Cours déplacé'],
+    [/rattrapage/i, 'Séance de rattrapage'],
+    [/repri[sn]|reprendre/i, 'Reprise des cours'],
+    [/changement de salle/i, 'Changement de salle'],
+    [/\bTD\b/, 'Séance de TD'],
+    [/\bTP\b/, 'Séance de TP'],
+    [/\bCM\b|\bcours\b/i, 'Cours'],
+    [/réunion|reunion/i, 'Réunion'],
+  ],
+};
+
+/** Turns a whole sentence into a short label ("Partiel", "Rendre le dossier", "Cours annulé"). */
+function shortTitle(sentence, type) {
+  const rules = SHORT_TITLES[type === 'quiz' ? 'exam' : type] || SHORT_TITLES.info;
+  for (const [re, label] of rules) {
+    const m = re.exec(sentence);
+    if (m) return typeof label === 'function' ? label(m) : label;
+  }
+  return type === 'exam' ? 'Examen' : type === 'deadline' ? 'À rendre' : 'Info';
+}
+
+/** Short, clear titles: course codes replaced by names, long sentences summarised. */
+function tidyTitle(it, courses) {
+  let title = it.title;
+  for (const c of courses) {
+    if (!isCourseCode(c.shortName)) continue;
+    const name = readableCourseName(c);
+    if (title.includes(c.shortName)) title = title.split(c.shortName).join(name);
+    if (it.description && it.description.includes(c.shortName)) it.description = it.description.split(c.shortName).join(name);
+  }
+  const extracted = it.sources.some((s) => s.kind === 'mail' || s.kind === 'page' || s.kind === 'announcement');
+  if (extracted && (title.length > 55 || /[.!]$/.test(title))) {
+    if (!it.description) it.description = title;
+    title = shortTitle(title, it.type);
+  }
+  return title;
+}
+
 function familyOf(type) {
   if (type === 'exam' || type === 'quiz') return 'exam';
   if (type === 'deadline') return 'deadline';
@@ -189,7 +271,7 @@ function buildAgenda({ snapshot, mails = [], extractions = {}, calendars = [], s
     filesByCourse.set(Number(courseId), list);
   }
 
-  const courseInfo = (c) => (c ? { courseId: c.id, courseName: c.fullName, courseShort: c.shortName } : { courseId: null, courseName: '', courseShort: '' });
+  const courseInfo = (c) => (c ? { courseId: c.id, courseName: c.fullName, courseShort: readableCourseName(c), courseCode: c.shortName } : { courseId: null, courseName: '', courseShort: '', courseCode: '' });
   const items = [];
 
   // 1. Moodle calendar: assignments, quizzes, course events.
@@ -387,6 +469,7 @@ function buildAgenda({ snapshot, mails = [], extractions = {}, calendars = [], s
   // 4. Status, documents, final shape.
   const visible = items.filter((it) => it.start >= now - 21 * DAY && !(state.hiddenItems || {})[it.id]);
   for (const it of visible) {
+    it.title = tidyTitle(it, allCourses);
     const ended = (it.end || it.start + (it.allDay ? DAY : 0)) < now;
     it.manualDone = Boolean((state.done || {})[it.id]);
     if (it.manualDone || it.submitted) it.status = 'done';
@@ -493,4 +576,4 @@ function buildAgenda({ snapshot, mails = [], extractions = {}, calendars = [], s
   return { generatedAt: now, items: visible, news: news.slice(0, 80), courses: courseList, fileIndex, stats };
 }
 
-module.exports = { buildAgenda, matchCourse, relatedFiles, fileMatchesRefs, fileNumbers, updateFileFirstSeen, familyOf, pageTexts };
+module.exports = { readableCourseName, shortTitle, isCourseCode, buildAgenda, matchCourse, relatedFiles, fileMatchesRefs, fileNumbers, updateFileFirstSeen, familyOf, pageTexts };

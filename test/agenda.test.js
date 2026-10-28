@@ -28,7 +28,7 @@ test('turns Moodle events into agenda items', async () => {
   const dossier = a.items.find((i) => i.id === 'moodle-1001');
   assert.equal(dossier.type, 'deadline');
   assert.equal(dossier.title, 'Dossier TD 3');
-  assert.equal(dossier.courseShort, 'L2-MACRO');
+  assert.equal(dossier.courseShort, 'Macroéconomie 1');
   assert.equal(dossier.status, 'todo');
   assert.equal(dossier.submitted, false);
   assert.equal(dossier.files[0].name, 'Sujet_TD3.pdf');
@@ -159,4 +159,31 @@ test('falls back to course events when category events are refused', async () =>
   const snap = await new MoodleClient({ baseUrl: base, token: 'tok', fetchImpl }).fetchSnapshot({ now });
   assert.equal(snap.events.length, 4);
   assert.deepEqual(snap.warnings, []);
+});
+
+test('titles are short and course codes become course names', () => {
+  const { readableCourseName, shortTitle } = require('../src/main/agenda');
+  assert.equal(readableCourseName({ shortName: 'UL1PY001', fullName: 'UL1PY001 - Introduction à la psychologie' }), 'Introduction à la psychologie');
+  assert.equal(readableCourseName({ shortName: 'UL1PY001', fullName: 'Psychologie générale' }), 'Psychologie générale');
+  assert.equal(shortTitle('Reprise ce mercredi 28 octobre de 18h à 19h.', 'info'), 'Reprise des cours');
+  assert.equal(shortTitle('Le CC2 de statistiques se déroulera le mardi 10/11.', 'exam'), 'CC2');
+
+  const now = Date.now();
+  const day = new Date(now + 5 * DAY * 1000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+  const snapshot = {
+    site: { name: 'Test', url: 'https://m.test' },
+    courses: [{ id: 3, shortName: 'UL1PY001', fullName: 'UL1PY001 - Introduction à la psychologie', url: 'https://m.test/course/view.php?id=3' }],
+    events: [],
+    assignments: {},
+    announcements: [],
+    contents: { 3: [{ id: 1, num: 0, name: 'Infos', summary: `Reprise ce ${day} de 18h à 19h en salle 104 pour UL1PY001.`, modules: [] }] },
+  };
+  const { pageTexts } = require('../src/main/agenda');
+  const p = pageTexts(snapshot)[0];
+  const extractions = { [p.key]: { events: [{ type: 'info', title: p.text, start: now + 5 * DAY * 1000, allDay: false, todo: [], refs: [], confidence: 'probable', detail: '' }] } };
+  const a = buildAgenda({ snapshot, extractions, state: emptyState(), now });
+  const it = a.items[0];
+  assert.equal(it.title, 'Reprise des cours');
+  assert.equal(it.courseShort, 'Introduction à la psychologie');
+  assert.match(it.description, /Introduction à la psychologie/, 'the full sentence stays in the details, code replaced');
 });

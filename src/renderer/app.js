@@ -190,7 +190,7 @@ function matchesFilters(it) {
   if (S.filter === 'info' && it.family !== 'info') return false;
   if (S.search) {
     const q = S.search.toLowerCase();
-    const hay = `${it.title} ${it.courseName} ${it.courseShort} ${it.description} ${it.todo.join(' ')}`.toLowerCase();
+    const hay = `${it.title} ${it.courseName} ${it.courseShort} ${it.courseCode || ''} ${it.description} ${it.todo.join(' ')}`.toLowerCase();
     if (!hay.includes(q)) return false;
   }
   return true;
@@ -240,7 +240,7 @@ function statusChip(it) {
 
 function courseTag(it) {
   if (!it.courseId) return null;
-  return h('span', { class: 'course', title: it.courseName, style: { '--c': courseColor(it.courseId) } }, h('i', { class: 'dot' }), it.courseShort || it.courseName);
+  return h('span', { class: 'course', title: [it.courseName, it.courseCode].filter(Boolean).join(' · '), style: { '--c': courseColor(it.courseId) } }, h('i', { class: 'dot' }), it.courseShort || it.courseName);
 }
 
 function itemDetails(it) {
