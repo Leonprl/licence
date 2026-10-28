@@ -1,0 +1,88 @@
+{
+  "name": "ma-licence",
+  "productName": "Ma Licence",
+  "version": "0.1.0",
+  "description": "Tableau de bord étudiant : devoirs, examens et documents depuis Moodle et la boîte mail, mis à jour automatiquement.",
+  "author": "leonprl",
+  "license": "MIT",
+  "private": true,
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
+    "chrono-node": "2.10.3",
+    "imapflow": "2.4.0",
+    "mailparser": "3.12.4"
+  },
+  "devDependencies": {
+    "electron": "44.10.0",
+    "electron-builder": "26.17.0"
+  },
+  "desktopName": "ma-licence.desktop",
+  "build": {
+    "appId": "fr.malicence.dashboard",
+    "productName": "Ma Licence",
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "artifactName": "Ma-Licence-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Ma Licence"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.education",
+      "artifactName": "Ma-Licence-${version}-${arch}.${ext}",
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Education",
+      "maintainer": "leonprl",
+      "artifactName": "Ma-Licence-${version}.${ext}",
+      "syncDesktopName": true
+    }
+  }
+}

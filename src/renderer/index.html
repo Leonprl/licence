@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ma Licence</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Ma Licence</div>
+    <nav class="tabs" id="tabs" aria-label="Vues">
+      <button type="button" data-view="agenda">Agenda</button>
+      <button type="button" data-view="week">Semaine</button>
+      <button type="button" data-view="news">Nouveautés</button>
+      <button type="button" data-view="courses">Cours</button>
+    </nav>
+    <div class="topbar-right">
+      <button type="button" class="sync" id="sync" title="Synchroniser maintenant"></button>
+      <button type="button" class="icon-btn" id="settings-btn" title="Réglages" aria-label="Réglages"></button>
+    </div>
+  </header>
+  <main id="main" tabindex="-1"></main>
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
