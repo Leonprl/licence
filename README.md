@@ -14,12 +14,10 @@ Tout reste sur ton ordinateur : l'appli ne modifie rien sur Moodle ni dans ta bo
 
 ## Installer
 
-1. Va dans l'onglet **Actions** du dépôt GitHub, ouvre la dernière exécution « Build » réussie (✅), puis télécharge en bas de la page l'artefact de ton système :
-   - **Windows** : `Ma-Licence-Windows`, qui contient `Ma-Licence-Setup-x.y.z.exe`.
-   - **Mac** : `Ma-Licence-macOS`, qui contient un `.dmg` (`arm64` pour les Mac M1/M2/M3/M4, `x64` pour les anciens Mac Intel).
-   - **Linux** : `Ma-Licence-Linux`, qui contient un `.AppImage` ou un `.deb`.
-
-   Si une version est publiée (tag `v…`), les mêmes fichiers sont aussi dans l'onglet **Releases**.
+1. Ouvre la page de la dernière version, <https://github.com/Leonprl/licence/releases/latest>, et télécharge le fichier de ton ordinateur :
+   - **Windows** : `Ma-Licence-Setup-x.y.z.exe`.
+   - **Mac** : le `.dmg` qui finit par `arm64` pour les Mac M1/M2/M3/M4, ou par `x64` pour les anciens Mac Intel.
+   - **Linux** : le `.AppImage` ou le `.deb`.
 2. Lance l'installateur. L'appli n'est pas signée avec un certificat payant, donc :
    - **Windows** affiche « Windows a protégé votre ordinateur » : clique sur *Informations complémentaires*, puis *Exécuter quand même*.
    - **Mac** : glisse l'appli dans *Applications*. Si macOS dit qu'elle « est endommagée » ou « ne peut pas être ouverte », ouvre le Terminal et tape :
