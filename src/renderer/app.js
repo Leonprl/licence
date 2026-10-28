@@ -947,11 +947,13 @@ function mailSection() {
         {
           type: 'button',
           class: 'btn',
-          disabled: S.busy.mailTest,
-          onclick: async () => {
-            S.busy.mailTest = true;
+          onclick: async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.textContent = 'Test en cours…';
             const res = await guarded(() => api.mailTest(readForm()));
-            S.busy.mailTest = false;
+            btn.disabled = false;
+            btn.textContent = 'Tester la connexion';
             if (res) toast(`Connexion réussie : ${res.map((b) => `${b.mailbox} (${b.messages} messages)`).join(', ')}`, 'ok');
           },
         },
