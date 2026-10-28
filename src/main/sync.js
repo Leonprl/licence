@@ -7,14 +7,16 @@ const { MoodleClient, MoodleError } = require('./moodle');
 const { fetchMails } = require('./mail');
 const { extractFromMessage, looksAcademic } = require('./extract');
 const { extractWithClaude } = require('./ai');
-const { buildAgenda, updateFileFirstSeen } = require('./agenda');
+const { buildAgenda, updateFileFirstSeen, pageTexts } = require('./agenda');
+const { fetchIcs } = require('./ics');
 const { dayKey } = require('./util');
 
 const DAY = 24 * 3600 * 1000;
 // Bump when the rule-based extractor changes, so cached results are recomputed.
-const RULES_VERSION = 'rules-4';
+const RULES_VERSION = 'rules-5';
 const AI_VERSION = 'ai-1';
 const MAX_AI_CALLS_PER_SYNC = 40;
+const RERUN_REASONS = new Set(['manual', 'settings', 'login', 'course-shown']);
 
 const TYPE_LABELS = { exam: 'Examen', quiz: 'Test en ligne', deadline: 'À rendre', info: 'Info', event: 'Événement' };
 
@@ -48,18 +50,29 @@ class SyncEngine extends EventEmitter {
     this.emit('status', this.status);
   }
 
-  /** Runs a sync, or returns the one already running. */
+  /**
+   * Runs a sync, or returns the one already running. A sync asked for while another one runs
+   * (new settings, new calendar…) is run again right after, so the change is not missed.
+   */
   run(reason = 'manual') {
-    if (!this.running) {
-      this.running = this._run(reason)
-        .catch((e) => {
-          this.setStatus({ state: 'error', step: '', errors: { general: `Erreur inattendue : ${e.message}` } });
-          return this.storage.cache.agenda || null;
-        })
-        .finally(() => {
-          this.running = null;
-        });
+    if (this.running) {
+      // Only changes made by the user need a second pass; timers and window focus do not.
+      if (RERUN_REASONS.has(reason)) this.pendingReason = reason;
+      return this.running;
     }
+    this.running = this._run(reason)
+      .catch((e) => {
+        this.setStatus({ state: 'error', step: '', errors: { general: `Erreur inattendue : ${e.message}` } });
+        return this.storage.cache.agenda || null;
+      })
+      .finally(() => {
+        this.running = null;
+        if (this.pendingReason) {
+          const next = this.pendingReason;
+          this.pendingReason = null;
+          this.run(next);
+        }
+      });
     return this.running;
   }
 
@@ -111,6 +124,21 @@ class SyncEngine extends EventEmitter {
       }
     }
 
+    // Timetable / calendar links (.ics)
+    const calendars = settings.calendars || [];
+    if (calendars.length) onProgress('Calendriers');
+    cache.calendars = await Promise.all(
+      calendars.map(async (c) => {
+        try {
+          return { ...c, events: await fetchIcs(c.url, this.fetchImpl) };
+        } catch (e) {
+          errors.calendars = `Calendrier « ${c.name || c.url} » : ${e.message}`;
+          const previous = (cache.calendars || []).find((x) => x.url === c.url);
+          return { ...c, events: previous ? previous.events : [], error: e.message };
+        }
+      })
+    );
+
     // Extraction (cached per message)
     await this.extractAll(onProgress, errors);
 
@@ -119,13 +147,7 @@ class SyncEngine extends EventEmitter {
     updateFileFirstSeen(cache.moodle, storage.state, now);
     const previousIds = new Set(((cache.agenda && cache.agenda.items) || []).map((i) => i.id));
     const firstBuild = !cache.agenda;
-    cache.agenda = buildAgenda({
-      snapshot: cache.moodle || null,
-      mails: this.mails(),
-      extractions: cache.extractions || {},
-      state: storage.state,
-      now,
-    });
+    cache.agenda = buildAgenda(this.agendaInput(now));
     cache.lastSync = now;
     cache.lastErrors = errors;
     storage.saveCache();
@@ -142,17 +164,23 @@ class SyncEngine extends EventEmitter {
   /** Recomputes the agenda from cached data (after ticking an item, hiding a course…). */
   rebuild() {
     const { storage } = this;
-    storage.cache.agenda = buildAgenda({
-      snapshot: storage.cache.moodle || null,
-      mails: this.mails(),
-      extractions: storage.cache.extractions || {},
-      state: storage.state,
-      now: this.now(),
-    });
+    storage.cache.agenda = buildAgenda(this.agendaInput(this.now()));
     storage.saveCache();
     storage.saveState();
     this.emit('data', storage.cache.agenda);
     return storage.cache.agenda;
+  }
+
+  agendaInput(now) {
+    const { cache, state } = this.storage;
+    return {
+      snapshot: cache.moodle || null,
+      mails: this.mails(),
+      extractions: cache.extractions || {},
+      calendars: cache.calendars || [],
+      state,
+      now,
+    };
   }
 
   mails() {
@@ -176,12 +204,21 @@ class SyncEngine extends EventEmitter {
     for (const a of (cache.moodle && cache.moodle.announcements) || []) {
       sources.push({ key: `ann:${a.id}:${a.time}`, msg: { subject: a.subject, text: a.message, date: a.created || a.time, from: a.author } });
     }
+    // Course pages: explicit dates only, rules only (pages change rarely and can be long).
+    for (const p of pageTexts(cache.moodle)) {
+      sources.push({ key: p.key, page: true, msg: { subject: p.label, text: p.text, date: this.now() } });
+    }
 
     const fresh = {};
     let aiCalls = 0;
     let aiError = null;
-    for (const { key, msg } of sources) {
+    for (const { key, msg, page } of sources) {
       const prev = cache.extractions[key];
+      if (page) {
+        const version = `${RULES_VERSION}-page`;
+        fresh[key] = prev && prev.version === version ? prev : { ...extractFromMessage(msg, { strict: true }), version };
+        continue;
+      }
       if (prev && prev.version === wanted) {
         fresh[key] = prev;
         continue;

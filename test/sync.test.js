@@ -93,3 +93,20 @@ test('Moodle documents are downloaded once into a folder per course', async () =
   await assert.rejects(ensureLocalFile({ kind: 'mail', path: '/etc/passwd' }, ctx), /introuvable/);
   void DAY;
 });
+
+test('a settings change during a sync triggers a second sync afterwards', async () => {
+  const dir = tmpDir();
+  const now = Date.now();
+  const moodle = fakeMoodle({ now });
+  const storage = new Storage(dir, fakeSafeStorage);
+  storage.updateSettings({ moodle: { baseUrl: moodle.base, token: 'tok' } });
+  const engine = new SyncEngine({ storage, fetchImpl: moodle.fetchImpl, now: () => now });
+  let runs = 0;
+  engine.on('data', () => runs++);
+  const first = engine.run('startup');
+  engine.run('timer'); // ignored: already running
+  engine.run('settings'); // queued
+  await first;
+  await new Promise((resolve) => engine.once('data', resolve));
+  assert.equal(runs, 2);
+});

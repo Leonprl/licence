@@ -32,25 +32,31 @@ Au premier lancement, clique sur **Configurer**.
 
 ### Moodle
 
-1. Colle l'adresse de ton Moodle (celle de ton navigateur, par exemple `moodle.univ-ville.fr`), puis clique sur **Vérifier**.
-2. Choisis la méthode de connexion. L'appli met en avant celle qui convient à ton Moodle :
-   - **Page de connexion de l'université (ENT, CAS…)** : une fenêtre s'ouvre et tu te connectes comme d'habitude. C'est la même méthode que l'appli mobile officielle Moodle. Ton mot de passe n'est pas enregistré.
-   - **Identifiant et mot de passe Moodle**, si ton Moodle a des comptes « locaux ».
+1. Colle l'adresse de ton Moodle (celle de ton navigateur), puis clique sur **Vérifier**.
+   - À **Sorbonne Université**, l'adresse change chaque année : pour 2026-2027 c'est `moodle-lettres-26.sorbonne-universite.fr` (Lettres) ou `moodle-sciences-26.sorbonne-universite.fr` (Sciences). Avec le Moodle de l'an dernier, l'appli ne verra pas tes examens de cette année (elle t'avertit si c'est le cas).
+2. Clique sur le premier **Se connecter** (page de connexion de l'université). Une fenêtre s'ouvre directement sur la page CAS de ta fac : connecte-toi comme d'habitude, la fenêtre se ferme toute seule. C'est la même méthode que l'appli mobile officielle Moodle, et ton mot de passe n'est pas enregistré.
+   - **Identifiant et mot de passe Moodle** : seulement si ton Moodle a des comptes « locaux ». Les comptes CAS (cas de la Sorbonne) n'ont pas de mot de passe Moodle.
    - **Jeton** si rien d'autre ne marche : sur Moodle, va dans ton profil, puis *Préférences*, puis *Clés de sécurité*, et copie la clé « Moodle mobile web service ».
-
-Si ton université a désactivé l'accès de l'appli mobile Moodle, aucune de ces méthodes ne marchera. Dans ce cas, demande au support informatique.
 
 ### Mails
 
-L'appli lit ta boîte en **IMAP** (lecture seule) :
+Mets **ton adresse mail et ton mot de passe**, puis clique sur **Se connecter** : l'appli trouve toute seule le serveur de ta messagerie. Elle lit ta boîte en lecture seule et continue en arrière-plan, sans te redemander de te connecter.
 
-| Messagerie | Réglage |
+| Messagerie | Ce qu'il faut savoir |
 |---|---|
-| **Université** (Zimbra, Partage…) | Choisis « Messagerie de l'université ». Le nom du serveur IMAP est dans l'aide de ta messagerie ou sur le site de la DSI (port 993, SSL). |
-| **Gmail** | Choisis « Gmail ». Il faut un *mot de passe d'application* : active la validation en deux étapes, puis crée-le sur <https://myaccount.google.com/apppasswords>. |
-| **Microsoft 365 / Outlook** (fréquent dans les universités) | Beaucoup d'universités bloquent la connexion IMAP par mot de passe. Si le test échoue, crée dans Outlook Web une règle de **transfert automatique** vers une adresse Gmail, puis connecte ce Gmail. |
+| **Sorbonne Université** (`…@etu.sorbonne-universite.fr`) | Serveur trouvé automatiquement (`imaps.sorbonne-universite.fr`). Mot de passe : celui de ton compte Sorbonne (ENT). Si l'adresse est refusée, ouvre « Réglages avancés » et mets ton identifiant Sorbonne dans « Identifiant de connexion ». |
+| **Gmail** et boîtes hébergées par Google | Il faut un *mot de passe d'application* : active la validation en deux étapes, puis crée-le sur <https://myaccount.google.com/apppasswords>. |
+| **Microsoft 365 / Outlook** | Beaucoup d'établissements bloquent la connexion par mot de passe. Si ça échoue, crée dans Outlook Web une règle de **transfert automatique** vers une adresse Gmail, puis connecte ce Gmail. |
 
-Clique sur **Tester la connexion**, puis sur **Enregistrer**. Le champ « Ne garder que les expéditeurs contenant » (par exemple `univ-ville.fr, moodle`) permet d'ignorer les mails perso.
+Dans « Réglages avancés », le champ « Ne garder que les expéditeurs contenant » (par exemple `sorbonne-universite.fr, moodle`) permet d'ignorer les mails perso.
+
+### Emploi du temps (optionnel)
+
+Si ta fac publie ton emploi du temps ou tes examens dans un agenda en ligne (ADE, ENT, Google Agenda…), copie son lien d'abonnement (`.ics`, « exporter » ou « s'abonner ») et ajoute-le dans **Réglages › Emploi du temps et calendriers**. L'appli n'en garde que les examens et les rendus, sauf si tu coches « tout afficher ».
+
+### Vérifier que tout est pris en compte
+
+En haut des réglages, **Ce que l'appli a vérifié** indique ce qui a été lu : nombre de cours, d'événements Moodle, de devoirs, d'annonces, de pages de cours, de mails et de calendriers, ainsi que les examens et rendus trouvés. Les dates d'examen ne sont pas toujours sur Moodle : elles arrivent souvent par mail ou dans l'emploi du temps, d'où l'intérêt de connecter les trois.
 
 ### Analyse par IA (optionnelle)
 
@@ -81,7 +87,9 @@ Organisation du code :
 - `src/main/moodle.js` : client des web services Moodle (ceux de l'appli mobile officielle).
 - `src/main/moodle-sso.js` : connexion par la page de l'université (`launch.php` → `moodlemobile://token=…`).
 - `src/main/mail.js` : lecture IMAP (imapflow + mailparser), pièces jointes enregistrées localement.
-- `src/main/extract.js` : repérage des examens, rendus et « à travailler » dans les textes en français (chrono-node).
+- `src/main/mail-detect.js` : trouve le serveur IMAP à partir de l'adresse (fournisseurs connus, MX, autoconfig Thunderbird).
+- `src/main/ics.js` : lecture des liens d'emploi du temps (`.ics`).
+- `src/main/extract.js` : repérage des examens, rendus et « à travailler » dans les mails, annonces et pages de cours en français (chrono-node).
 - `src/main/ai.js` : extraction optionnelle avec Claude (sortie JSON structurée).
 - `src/main/agenda.js` : fusion Moodle + mails + annonces, doublons, documents recommandés.
 - `src/main/sync.js` : synchronisation, cache et notifications.

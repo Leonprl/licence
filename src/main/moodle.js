@@ -105,7 +105,8 @@ class MoodleClient {
       // 1 = identifiant/mot de passe dans l'app, 2 = navigateur, 3 = navigateur intégré
       typeOfLogin: cfg.typeoflogin,
       launchUrl: cfg.launchurl || `${root}/admin/tool/mobile/launch.php`,
-      identityProviders: (cfg.identityproviders || []).map((p) => p.name),
+      // CAS / OAuth buttons of the login page: [{name, url}]
+      identityProviders: (cfg.identityproviders || []).filter((p) => p && p.url).map((p) => ({ name: decodeEntities(p.name || ''), url: p.url })),
       mobileEnabled: cfg.enablemobilewebservice !== 0,
     };
   }
@@ -212,6 +213,7 @@ class MoodleClient {
       endDate: (c.enddate || 0) * 1000,
       lastAccess: (c.lastaccess || 0) * 1000,
       favourite: Boolean(c.isfavourite),
+      categoryId: c.category || null,
     }));
     // Courses that ended more than a month ago (previous years) are left out.
     const courses = allCourses.filter((c) => !c.endDate || c.endDate > now - 30 * DAY);
@@ -228,6 +230,8 @@ class MoodleClient {
         id: s.id,
         num: s.section,
         name: decodeEntities(s.name || ''),
+        // Text written on the course page: teachers often put exam dates there.
+        summary: htmlToText(s.summary).slice(0, 6000),
         modules: (s.modules || [])
           .filter((m) => m.uservisible !== false)
           .map((m) => {
@@ -237,6 +241,7 @@ class MoodleClient {
               instance: m.instance,
               name: decodeEntities(m.name),
               url: m.url || null,
+              description: htmlToText(m.description).slice(0, 6000),
               files: [],
               links: [],
             };
@@ -265,17 +270,22 @@ class MoodleClient {
     onProgress('Moodle : calendrier');
     const from = Math.floor((now - pastDays * DAY) / 1000);
     const to = Math.floor((now + futureDays * DAY) / 1000);
-    const cal = courseIds.length
-      ? await soft(
-          'Calendrier',
-          () =>
-            this.call('core_calendar_get_calendar_events', {
-              events: { courseids: courseIds },
-              options: { userevents: 1, siteevents: 1, timestart: from, timeend: to },
-            }),
-          { events: [] }
-        )
-      : { events: [] };
+    // Category events are those published for a whole programme (exam sessions, for instance).
+    const categoryIds = [...new Set(active.map((c) => c.categoryId).filter(Boolean))];
+    const calendarCall = (withCategories) =>
+      this.call('core_calendar_get_calendar_events', {
+        events: withCategories ? { courseids: courseIds, categoryids: categoryIds } : { courseids: courseIds },
+        options: { userevents: 1, siteevents: 1, timestart: from, timeend: to },
+      });
+    let cal = { events: [] };
+    if (courseIds.length) {
+      try {
+        cal = await calendarCall(categoryIds.length > 0);
+      } catch (e) {
+        if (e instanceof MoodleError && e.needsLogin) throw e;
+        cal = await soft('Calendrier', () => calendarCall(false), { events: [] });
+      }
+    }
     const events = (cal.events || []).map((e) => {
       const mod = e.modulename ? moduleIndex[`${e.modulename}:${e.instance}`] : null;
       return {
@@ -344,7 +354,7 @@ class MoodleClient {
         );
         for (const d of (res && res.discussions) || []) {
           const time = (d.timemodified || d.created || 0) * 1000;
-          if (time < now - 45 * DAY) continue;
+          if (time < now - 60 * DAY) continue;
           announcements.push({
             id: d.discussion,
             postId: d.id,

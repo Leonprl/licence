@@ -176,7 +176,7 @@ main { flex: 1; overflow-y: auto; outline: none; }
 .btn-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .btn.ghost.active { background: var(--accent-soft); color: var(--accent); }
 
-input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="search"], select {
+input[type="text"], input[type="email"], input[type="url"], input[type="password"], input[type="number"], input[type="search"], select {
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 8px;
@@ -406,7 +406,7 @@ h2.day.late { color: var(--warn); }
 .help { font-size: 12.5px; color: var(--muted); margin: 0; }
 .help.warn { color: var(--warn); }
 .inline { display: flex; gap: 8px; align-items: center; }
-.inline input[type="text"], .inline input[type="url"], .inline input[type="password"] { flex: 1; }
+.inline input[type="text"], .inline input[type="email"], .inline input[type="url"], .inline input[type="password"] { flex: 1; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .connected { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--ok); }
 .connected strong { color: var(--text); }
@@ -451,3 +451,18 @@ details.method summary { cursor: pointer; font-weight: 600; }
   .grid2 { grid-template-columns: 1fr; }
   .card-main { grid-template-columns: 70px minmax(0, 1fr) auto 34px; gap: 10px; }
 }
+
+/* ---------- settings: mail, calendars, diagnostics */
+
+details.advanced { border-top: 1px dashed var(--border); padding-top: 10px; }
+details.advanced summary { cursor: pointer; color: var(--text-2); font-weight: 500; margin-bottom: 10px; }
+details.advanced[open] summary { margin-bottom: 14px; }
+.cal-row { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
+.cal-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cal-info .help { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+input.cal-name { max-width: 220px; }
+ul.diag { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+ul.diag li { display: flex; gap: 12px; }
+ul.diag li.warn { color: var(--warn); }
+.diag-label { width: 90px; flex: none; font-weight: 600; color: var(--text-2); }
+.banner.warn { background: var(--warn-soft); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }

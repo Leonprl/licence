@@ -1,5 +1,6 @@
 'use strict';
 
+const dns = require('dns');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -9,6 +10,9 @@ const { SyncEngine } = require('./sync');
 const { MoodleClient, MoodleError } = require('./moodle');
 const { ssoLogin } = require('./moodle-sso');
 const { testConnection, PRESETS } = require('./mail');
+const { detectMailSettings } = require('./mail-detect');
+const { fetchIcs } = require('./ics');
+const { classifyCalendarEntry } = require('./extract');
 const { testApiKey } = require('./ai');
 const { ensureLocalFile } = require('./files');
 
@@ -114,7 +118,7 @@ function createTray() {
 
 function isConfigured() {
   const s = storage.settings;
-  return Boolean((s.moodle.baseUrl && s.moodle.token) || (s.mail.enabled && s.mail.host));
+  return Boolean((s.moodle.baseUrl && s.moodle.token) || (s.mail.enabled && s.mail.host) || (s.calendars || []).length);
 }
 
 function schedule() {
@@ -220,15 +224,24 @@ function registerIpc() {
 
   handle('ai-test', async (apiKey) => testApiKey(apiKey || storage.secret('ai', 'apiKey')));
 
+  handle('mail-detect', async (email) => detectMailSettings(email, { fetchImpl: net.fetch, resolveMx: dns.promises.resolveMx }));
+
+  handle('calendar-test', async (url) => {
+    const events = await fetchIcs(url, net.fetch);
+    const upcoming = events.filter((e) => e.start > Date.now() - 24 * 3600 * 1000);
+    return { events: events.length, upcoming: upcoming.length, exams: upcoming.filter((e) => classifyCalendarEntry(`${e.summary} ${e.description}`)).length };
+  });
+
   handle('save-settings', async (partial) => {
     // Empty secret fields mean "keep the saved one".
     if (partial.mail && !partial.mail.password) delete partial.mail.password;
     if (partial.ai && !partial.ai.apiKey) delete partial.ai.apiKey;
-    const before = JSON.stringify({ mail: storage.settings.mail, ai: storage.settings.ai });
+    const watched = () => JSON.stringify({ mail: storage.settings.mail, ai: storage.settings.ai, calendars: storage.settings.calendars });
+    const before = watched();
     const result = storage.updateSettings(partial);
     applyLoginItem();
     schedule();
-    const after = JSON.stringify({ mail: storage.settings.mail, ai: storage.settings.ai });
+    const after = watched();
     if (before !== after && isConfigured()) engine.run('settings');
     return result;
   });

@@ -62,6 +62,13 @@ function classifySentence(sentence) {
   return null;
 }
 
+/** For timetable entries: only real exams and hand-ins, never ordinary classes ("TD Projet"). */
+function classifyCalendarEntry(text) {
+  if (EXAM_RE.test(text) || EXAM_ABBR_RE.test(text)) return 'exam';
+  if (DEADLINE_STRONG_RE.test(text)) return 'deadline';
+  return null;
+}
+
 function classifySubject(subject) {
   if (!subject) return null;
   if (EXAM_RE.test(subject) || EXAM_ABBR_RE.test(subject)) return 'exam';
@@ -107,9 +114,10 @@ function extractRefs(text) {
   return refs;
 }
 
-function isUsefulDate(result, ref) {
+function isUsefulDate(result, ref, strict) {
   const known = result.start;
-  if (!(known.isCertain('day') || known.isCertain('weekday'))) return false;
+  // In strict mode (text with no known writing date, like a course page) only explicit dates count.
+  if (strict ? !(known.isCertain('day') && known.isCertain('month')) : !(known.isCertain('day') || known.isCertain('weekday'))) return false;
   const t = known.date().getTime();
   return t >= ref.getTime() - 24 * 3600 * 1000 && t <= ref.getTime() + MAX_FUTURE_MS;
 }
@@ -137,9 +145,12 @@ function subjectFits(subject, type) {
 /**
  * Extracts dated events from a message.
  * @param {{subject?: string, text?: string, date?: string|number|Date}} msg
+ * @param {{strict?: boolean}} [opts] strict: for texts without a writing date (course pages):
+ *   explicit dates only, keywords required in the sentence itself, no "info" items.
  * @returns {{events: Array, todo: string[], refs: Array, academic: boolean}}
  */
-function extractFromMessage(msg) {
+function extractFromMessage(msg, opts = {}) {
+  const strict = Boolean(opts.strict);
   const ref = msg.date ? new Date(msg.date) : new Date();
   const subject = String(msg.subject || '').replace(/^\s*((re|tr|fwd?|réf)\s*:\s*)+/i, '').trim();
   const sentences = splitSentences(cleanBody(msg.text));
@@ -168,14 +179,14 @@ function extractFromMessage(msg) {
       results = [];
     }
     for (const r of results) {
-      if (!isUsefulDate(r, ref)) continue;
+      if (!isUsefulDate(r, ref, strict)) continue;
       let type = classifySentence(s.text);
       let confidence = 'probable';
-      if (!type && subjectType) {
+      if (!type && subjectType && !strict) {
         type = subjectType;
         confidence = 'faible';
       }
-      if (!type) continue;
+      if (!type || (strict && type === 'info')) continue;
       if (type !== 'info' && (EXAM_RE.test(s.text) || DEADLINE_STRONG_RE.test(s.text) || EXAM_ABBR_RE.test(s.text))) {
         confidence = 'sure';
       }
@@ -259,4 +270,5 @@ module.exports = {
   cleanSubject,
   splitSentences,
   classifySentence,
+  classifyCalendarEntry,
 };

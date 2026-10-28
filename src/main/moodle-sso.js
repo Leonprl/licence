@@ -20,7 +20,8 @@ function md5(s) {
 }
 
 /**
- * @param {{baseUrl: string, wwwroot: string, launchUrl: string}} cfg  from MoodleClient.getPublicConfig
+ * @param {{baseUrl: string, wwwroot: string, launchUrl: string, identityProviders?: {name, url}[]}} cfg
+ *   from MoodleClient.getPublicConfig
  * @param {BrowserWindow} [parent]
  * @returns {Promise<{token: string, privateToken: string|null}>}
  */
@@ -51,7 +52,10 @@ function ssoLogin(cfg, parent) {
     let finished = false;
     let lastUrl = '';
     let loginPageTried = false;
+    let identityProviderTried = false;
     let relaunches = 0;
+    const providers = (cfg.identityProviders || []).filter((p) => /^https?:\/\//i.test(p.url || ''));
+    const isLoginPath = (path) => /\/login\//.test(path);
 
     const finish = (err, value) => {
       if (finished) return;
@@ -93,7 +97,28 @@ function ssoLogin(cfg, parent) {
     const guard = (event, url) => {
       if (tryUrl(url)) event.preventDefault();
     };
-    win.webContents.on('will-redirect', (e, url) => guard(e, url));
+    // Last URL of the current navigation chain, to know where a redirect comes from.
+    let lastHop = '';
+    win.webContents.on('did-start-navigation', (details, url) => {
+      if (details && details.isMainFrame === false) return;
+      lastHop = (details && details.url) || url || lastHop;
+    });
+    win.webContents.on('will-redirect', (e, url) => {
+      const target = (e && e.url) || url;
+      const from = lastHop;
+      lastHop = target;
+      if (tryUrl(target)) return e.preventDefault();
+      // Older Moodle versions forget the app after a login started from the login page: when the login
+      // page redirects into the site (login complete, still "just logged in"), go back to launch.php.
+      if (loginPageTried && onSite(from) && isLoginPath(new URL(from).pathname) && onSite(target)) {
+        const path = new URL(target).pathname;
+        if (!isLoginPath(path) && !path.endsWith(LAUNCH_PATH) && relaunches < 2) {
+          relaunches++;
+          e.preventDefault();
+          win.loadURL(launch.toString()).catch(() => {});
+        }
+      }
+    });
     win.webContents.on('will-navigate', (e, url) => guard(e, url));
     win.webContents.on('will-frame-navigate', (details) => {
       if (tryUrl(details.url)) details.preventDefault();
@@ -119,7 +144,9 @@ function ssoLogin(cfg, parent) {
         // send the window to the login page; Moodle comes back to launch.php right after the login.
         if (!loginPageTried) {
           loginPageTried = true;
-          win.loadURL(`${cfg.baseUrl}/login/index.php`).catch(() => {});
+          const single = providers.length === 1;
+          identityProviderTried = single;
+          win.loadURL(single ? providers[0].url : `${cfg.baseUrl}/login/index.php`).catch(() => {});
           return;
         }
         finish(
@@ -130,8 +157,15 @@ function ssoLogin(cfg, parent) {
         return;
       }
 
+      // Moodle's own login page while the site uses a single university login (CAS…): go straight to it.
+      if (isLoginPath(path) && providers.length === 1 && !identityProviderTried && !new URL(url).searchParams.has('ticket')) {
+        identityProviderTried = true;
+        win.loadURL(providers[0].url).catch(() => {});
+        return;
+      }
+
       // Logged in but left on another Moodle page (dashboard…): ask for the token again.
-      if (!/\/login\//.test(path) && relaunches < 2) {
+      if (!isLoginPath(path) && relaunches < 2) {
         const userId = Number(await run('(window.M && M.cfg && M.cfg.userId) || 0', 0));
         if (userId > 0 && !finished) {
           relaunches++;

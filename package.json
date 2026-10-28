@@ -1,7 +1,7 @@
 {
   "name": "ma-licence",
   "productName": "Ma Licence",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Tableau de bord étudiant : devoirs, examens et documents depuis Moodle et la boîte mail, mis à jour automatiquement.",
   "author": "leonprl",
   "license": "MIT",

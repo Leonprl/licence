@@ -3,7 +3,7 @@
 // Turns raw Moodle data, e-mails and extracted events into what the window shows:
 // a dated list of things to do, a news feed and the course list.
 
-const { classifySentence } = require('./extract');
+const { classifySentence, classifyCalendarEntry } = require('./extract');
 const { dayKey, normalize, shortHash, truncate } = require('./util');
 
 const DAY = 24 * 3600 * 1000;
@@ -121,6 +121,22 @@ function updateFileFirstSeen(snapshot, state, now) {
   }
 }
 
+/** Blocks of text written on course pages (section summaries, labels…) that may contain dates. */
+function pageTexts(snapshot) {
+  const out = [];
+  for (const [courseId, sections] of Object.entries((snapshot && snapshot.contents) || {})) {
+    for (const s of sections) {
+      const blocks = [{ text: s.summary, label: s.name, sectionNum: s.num, url: null }];
+      for (const m of s.modules) if (m.description) blocks.push({ text: m.description, label: m.name, sectionNum: s.num, url: m.url });
+      for (const b of blocks) {
+        if (!b.text || !/\d/.test(b.text)) continue;
+        out.push({ key: `page:${courseId}:${shortHash(b.text)}`, courseId: Number(courseId), sectionNum: b.sectionNum, label: b.label || 'Page du cours', text: b.text, url: b.url });
+      }
+    }
+  }
+  return out;
+}
+
 function mergeInto(target, extra) {
   for (const line of extra.todo || []) if (!target.todo.includes(line) && target.todo.length < 10) target.todo.push(line);
   target.refs = [...(target.refs || []), ...(extra.refs || [])];
@@ -149,7 +165,7 @@ function titlesOverlap(a, b) {
  * @param {object} args.state           user state (done, hiddenCourses, fileFirstSeen…)
  * @param {number} args.now
  */
-function buildAgenda({ snapshot, mails = [], extractions = {}, state, now = Date.now() }) {
+function buildAgenda({ snapshot, mails = [], extractions = {}, calendars = [], state, now = Date.now() }) {
   const hiddenCourses = new Set(state.hiddenCourses || []);
   const allCourses = (snapshot && snapshot.courses) || [];
   const courses = allCourses.filter((c) => !hiddenCourses.has(c.id));
@@ -297,6 +313,66 @@ function buildAgenda({ snapshot, mails = [], extractions = {}, state, now = Date
     }
   }
 
+  // Dates written directly on course pages.
+  const pages = pageTexts(snapshot);
+  for (const p of pages) {
+    const course = courseById.get(p.courseId);
+    const ex = extractions[p.key];
+    if (!course || hiddenCourses.has(p.courseId) || !ex || !ex.events) continue;
+    const url = p.url || `${course.url}#section-${p.sectionNum}`;
+    for (const e of ex.events) {
+      extracted.push({
+        id: `page-${shortHash(`${p.key}|${e.type}|${dayKey(e.start)}`)}`,
+        type: e.type,
+        title: e.title,
+        ...courseInfo(course),
+        start: e.start,
+        end: e.end || null,
+        allDay: Boolean(e.allDay),
+        description: e.detail || '',
+        location: e.location || '',
+        todo: [...(e.todo || [])],
+        refs: e.refs || [],
+        files: [],
+        links: [{ label: 'Voir sur Moodle', url }],
+        sources: [{ kind: 'page', label: `Page du cours : « ${truncate(p.label, 60)} »`, ref: p.key, url }],
+        confidence: e.confidence || 'probable',
+        submitted: null,
+        sectionNum: p.sectionNum,
+      });
+    }
+  }
+
+  // Timetable links (.ics): exams and hand-ins only, unless the student asked for everything.
+  for (const cal of calendars) {
+    for (const ev of cal.events || []) {
+      if (ev.start < now - 21 * DAY || ev.start > now + 220 * DAY) continue;
+      const kind = classifyCalendarEntry(`${ev.summary} ${ev.description}`);
+      const type = kind || (cal.all ? 'event' : null);
+      if (!type) continue;
+      const course = matchCourse(`${ev.summary}\n${ev.description}`, courses);
+      extracted.push({
+        id: `ics-${shortHash(`${cal.url}|${ev.uid}|${ev.start}`)}`,
+        type,
+        title: ev.summary,
+        ...courseInfo(course),
+        start: ev.start,
+        end: ev.end || null,
+        allDay: Boolean(ev.allDay),
+        description: truncate(ev.description, 1500),
+        location: ev.location || '',
+        todo: [],
+        refs: [],
+        files: [],
+        links: [],
+        sources: [{ kind: 'calendar', label: `Calendrier « ${cal.name || 'importé'} »`, ref: `ics-${cal.url}` }],
+        confidence: 'sure',
+        submitted: null,
+        sectionNum: null,
+      });
+    }
+  }
+
   // 3. Merge duplicates (the same exam announced on Moodle, by e-mail and in a reminder).
   for (const x of extracted) {
     const target = items.find((it) => {
@@ -387,7 +463,34 @@ function buildAgenda({ snapshot, mails = [], extractions = {}, state, now = Date
     upcoming: visible.filter((it) => it.courseId === c.id && it.status === 'todo').length,
   }));
 
-  return { generatedAt: now, items: visible, news: news.slice(0, 80), courses: courseList, fileIndex };
+  // 7. What was analysed, for the "Ce que l'appli a trouvé" panel.
+  const upcoming = visible.filter((i) => i.status === 'todo');
+  const stats = {
+    moodle: snapshot
+      ? {
+          site: snapshot.site.name,
+          url: snapshot.site.url,
+          fetchedAt: snapshot.fetchedAt,
+          courses: courses.length,
+          hiddenCourses: hiddenCourses.size,
+          calendarEvents: (snapshot.events || []).length,
+          assignments: Object.keys(snapshot.assignments || {}).length,
+          announcements: (snapshot.announcements || []).length,
+          pages: pages.length,
+          files: [...filesByCourse.values()].reduce((n, l) => n + l.length, 0),
+          warnings: snapshot.warnings || [],
+        }
+      : null,
+    mails: { total: mails.length, withDates: mails.filter((m) => extractions[m.key] && extractions[m.key].events && extractions[m.key].events.length).length },
+    calendars: calendars.map((c) => ({ name: c.name, url: c.url, events: (c.events || []).length, error: c.error || null })),
+    upcoming: {
+      exam: upcoming.filter((i) => i.family === 'exam').length,
+      deadline: upcoming.filter((i) => i.family === 'deadline').length,
+      info: upcoming.filter((i) => i.family === 'info').length,
+    },
+  };
+
+  return { generatedAt: now, items: visible, news: news.slice(0, 80), courses: courseList, fileIndex, stats };
 }
 
-module.exports = { buildAgenda, matchCourse, relatedFiles, fileMatchesRefs, fileNumbers, updateFileFirstSeen, familyOf };
+module.exports = { buildAgenda, matchCourse, relatedFiles, fileMatchesRefs, fileNumbers, updateFileFirstSeen, familyOf, pageTexts };

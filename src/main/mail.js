@@ -34,7 +34,9 @@ function friendlyImapError(e, host) {
     return 'Identifiant ou mot de passe refusé par le serveur mail.';
   }
   if (e && (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN')) return `Serveur mail introuvable : ${host}.`;
-  if (e && (e.code === 'ECONNREFUSED' || e.code === 'ETIMEDOUT' || e.code === 'ECONNRESET')) return `Le serveur mail ${host} ne répond pas (port bloqué ?).`;
+  if (e && (e.code === 'ECONNREFUSED' || e.code === 'ETIMEDOUT' || e.code === 'ECONNRESET' || /Failed to establish connection|timed? ?out/i.test(msg))) {
+    return `Le serveur mail ${host} ne répond pas. Vérifie ta connexion internet ; sur certains Wi-Fi publics ou d'entreprise la messagerie (port 993) est bloquée : réessaie depuis un autre réseau.`;
+  }
   if (e && /certificate|self[- ]signed/i.test(msg)) return `Certificat TLS du serveur ${host} invalide.`;
   return `Erreur mail : ${msg}`;
 }

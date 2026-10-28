@@ -11,6 +11,8 @@ const DEFAULT_SETTINGS = {
   mail: {
     enabled: false,
     preset: 'custom',
+    email: '',
+    provider: '',
     host: '',
     port: 993,
     secure: true,
@@ -21,6 +23,8 @@ const DEFAULT_SETTINGS = {
     senderFilter: '',
   },
   ai: { enabled: false, apiKey: '' },
+  // Timetable links (.ics): [{url, name, all}]
+  calendars: [],
   general: { syncMinutes: 20, openAtLogin: true, notifications: true, closeToTray: true, reminderHours: 24 },
 };
 

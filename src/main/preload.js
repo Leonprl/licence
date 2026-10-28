@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('api', {
   moodleLogout: () => call('moodle-logout'),
   mailTest: (cfg) => call('mail-test', cfg),
   aiTest: (apiKey) => call('ai-test', apiKey),
+  mailDetect: (email) => call('mail-detect', email),
+  calendarTest: (url) => call('calendar-test', url),
   saveSettings: (partial) => call('save-settings', partial),
   setDone: (id, done) => call('set-done', id, done),
   hideItem: (id) => call('hide-item', id),

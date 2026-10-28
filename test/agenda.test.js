@@ -112,3 +112,51 @@ test('recognises chapter and TD numbers in file names', () => {
   assert.equal(fileMatchesRefs(f('cours 2024.pdf'), [{ kind: 'chapitre', nums: [20] }]), false);
   assert.equal(fileMatchesRefs(f('TD3.pdf'), [{ kind: 'chapitre', nums: [3] }]), false);
 });
+
+test('reads category events, dates written on course pages and timetable links', async () => {
+  const now = Date.now();
+  const { fetchImpl, base, calls } = fakeMoodle({ now });
+  const snap = await new MoodleClient({ baseUrl: base, token: 'tok', fetchImpl }).fetchSnapshot({ now });
+  assert.ok(calls.includes('categories:4'), 'category events are requested');
+
+  const { pageTexts } = require('../src/main/agenda');
+  const pages = pageTexts(snap);
+  const extractions = Object.fromEntries(pages.map((p) => [p.key, extractFromMessage({ subject: p.label, text: p.text, date: now }, { strict: true })]));
+  const calendars = [
+    {
+      url: 'https://edt.univ-test.fr/l2.ics',
+      name: 'EDT L2',
+      all: false,
+      events: [
+        { uid: 'a', summary: 'EXAMEN - Statistiques descriptives', description: '', location: 'Amphi 1', start: now + 12 * DAY * 1000, end: null, allDay: false },
+        { uid: 'b', summary: 'TD Projet tutoré', description: '', location: '', start: now + 2 * DAY * 1000, end: null, allDay: false },
+      ],
+    },
+  ];
+  const a = buildAgenda({ snapshot: snap, extractions, calendars, state: emptyState(), now });
+
+  const cc = a.items.find((i) => i.sources.some((s) => s.kind === 'page'));
+  assert.ok(cc, 'the CC2 written on the course page is found');
+  assert.equal(cc.type, 'exam');
+  assert.equal(cc.courseId, 12);
+  assert.equal(cc.location, 'amphi C');
+  assert.equal(a.items.filter((i) => i.sources.some((s) => s.kind === 'page')).length, 1, 'TD on tuesdays and the calculator reminder are ignored');
+
+  const exam = a.items.find((i) => i.sources.some((s) => s.kind === 'calendar'));
+  assert.equal(exam.title, 'EXAMEN - Statistiques descriptives');
+  assert.equal(exam.courseId, 12, 'matched to the course by name');
+  assert.ok(!a.items.some((i) => i.title === 'TD Projet tutoré'), 'ordinary classes are not imported');
+
+  assert.equal(a.stats.moodle.courses, 2);
+  assert.equal(a.stats.moodle.pages, pages.length);
+  assert.equal(a.stats.calendars[0].events, 2);
+  assert.ok(a.stats.upcoming.exam >= 3);
+});
+
+test('falls back to course events when category events are refused', async () => {
+  const now = Date.now();
+  const { fetchImpl, base } = fakeMoodle({ now, rejectCategories: true });
+  const snap = await new MoodleClient({ baseUrl: base, token: 'tok', fetchImpl }).fetchSnapshot({ now });
+  assert.equal(snap.events.length, 4);
+  assert.deepEqual(snap.warnings, []);
+});

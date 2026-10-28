@@ -4,10 +4,21 @@
 
 const DAY = 24 * 3600;
 
-function fakeMoodle({ now = Date.now(), submitted = false, extraEvents = [] } = {}) {
+function fakeMoodle({ now = Date.now(), submitted = false, extraEvents = [], rejectCategories = false } = {}) {
   const t = Math.floor(now / 1000);
   const base = 'https://moodle.univ-test.fr';
   const calls = [];
+  const calendarEvents = () => ({
+    events: [
+      { id: 1001, name: 'Dossier TD 3 est dû', description: '<p>Déposer le PDF</p>', courseid: 11, modulename: 'assign', instance: 55, eventtype: 'due', timestart: t + 3 * DAY, timeduration: 0 },
+      { id: 1002, name: 'QCM chapitre 1 ferme', description: '', courseid: 12, modulename: 'quiz', instance: 77, eventtype: 'close', timestart: t + 5 * DAY, timeduration: 0 },
+      { id: 1003, name: 'QCM chapitre 1 ouvre', description: '', courseid: 12, modulename: 'quiz', instance: 77, eventtype: 'open', timestart: t + 1 * DAY, timeduration: 0 },
+      { id: 1004, name: 'Partiel de macroéconomie', description: 'Amphi A', courseid: 11, modulename: '', instance: 0, eventtype: 'course', timestart: t + 10 * DAY, timeduration: 2 * 3600 },
+      ...extraEvents,
+    ],
+    warnings: [],
+  });
+
   const data = {
     core_webservice_get_site_info: () => ({
       sitename: 'Moodle Univ Test',
@@ -18,8 +29,8 @@ function fakeMoodle({ now = Date.now(), submitted = false, extraEvents = [] } = 
       functions: [],
     }),
     core_enrol_get_users_courses: () => [
-      { id: 11, shortname: 'L2-MACRO', fullname: 'Macroéconomie 1', startdate: t - 60 * DAY, enddate: t + 90 * DAY },
-      { id: 12, shortname: 'L2-STAT', fullname: 'Statistiques descriptives', startdate: t - 60 * DAY, enddate: 0 },
+      { id: 11, shortname: 'L2-MACRO', fullname: 'Macroéconomie 1', startdate: t - 60 * DAY, enddate: t + 90 * DAY, category: 4 },
+      { id: 12, shortname: 'L2-STAT', fullname: 'Statistiques descriptives', startdate: t - 60 * DAY, enddate: 0, category: 4 },
       { id: 13, shortname: 'L1-HIST', fullname: 'Histoire économique', startdate: t - 500 * DAY, enddate: t - 200 * DAY },
     ],
     core_course_get_contents: (p) => {
@@ -47,18 +58,27 @@ function fakeMoodle({ now = Date.now(), submitted = false, extraEvents = [] } = 
           },
         ];
       }
-      return [{ id: 9, section: 0, name: '', modules: [{ id: 200, modname: 'quiz', instance: 77, name: 'QCM chapitre 1', url: `${base}/mod/quiz/view.php?id=200` }] }];
+      const ccDay = new Date((t + 15 * DAY) * 1000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+      return [
+        {
+          id: 9,
+          section: 0,
+          name: 'Informations',
+          summary: `<p>Bienvenue ! Les TD ont lieu le mardi.</p><p><strong>CC2 : le ${ccDay}</strong> en amphi C.</p>`,
+          modules: [
+            { id: 200, modname: 'quiz', instance: 77, name: 'QCM chapitre 1', url: `${base}/mod/quiz/view.php?id=200` },
+            { id: 201, modname: 'label', instance: 9, name: 'Étiquette', description: '<p>Rappel : apportez votre calculatrice.</p>' },
+          ],
+        },
+      ];
     },
-    core_calendar_get_calendar_events: () => ({
-      events: [
-        { id: 1001, name: 'Dossier TD 3 est dû', description: '<p>Déposer le PDF</p>', courseid: 11, modulename: 'assign', instance: 55, eventtype: 'due', timestart: t + 3 * DAY, timeduration: 0 },
-        { id: 1002, name: 'QCM chapitre 1 ferme', description: '', courseid: 12, modulename: 'quiz', instance: 77, eventtype: 'close', timestart: t + 5 * DAY, timeduration: 0 },
-        { id: 1003, name: 'QCM chapitre 1 ouvre', description: '', courseid: 12, modulename: 'quiz', instance: 77, eventtype: 'open', timestart: t + 1 * DAY, timeduration: 0 },
-        { id: 1004, name: 'Partiel de macroéconomie', description: 'Amphi A', courseid: 11, modulename: '', instance: 0, eventtype: 'course', timestart: t + 10 * DAY, timeduration: 2 * 3600 },
-        ...extraEvents,
-      ],
-      warnings: [],
-    }),
+    core_calendar_get_calendar_events: (p) => {
+      if (p.has('events[categoryids][0]')) {
+        calls.push(`categories:${p.get('events[categoryids][0]')}`);
+        if (rejectCategories) return { exception: 'x', errorcode: 'nopermissions', message: 'No permission for categories' };
+      }
+      return calendarEvents();
+    },
     mod_assign_get_assignments: () => ({
       courses: [
         {

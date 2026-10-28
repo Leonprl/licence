@@ -177,7 +177,7 @@ function courseColor(id) {
 
 function isConfigured() {
   const s = S.settings;
-  return s && (s.moodle.hasToken || (s.mail.enabled && s.mail.host));
+  return s && (s.moodle.hasToken || (s.mail.enabled && s.mail.host) || (s.calendars || []).length > 0);
 }
 
 function items() {
@@ -378,6 +378,18 @@ function itemCard(it, { forceOpen = false } = {}) {
 
 // ---------------------------------------------------------------- views
 
+/** "26" for the 2026-2027 academic year (it starts in August). */
+function academicYearSuffix() {
+  const now = new Date();
+  const y = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+  return String(y % 100).padStart(2, '0');
+}
+
+function staleBanner() {
+  const text = staleMoodleWarning();
+  return text ? h('div', { class: 'banner warn' }, icon('warn'), h('div', null, text), h('button', { type: 'button', class: 'btn small', onclick: () => go('settings') }, 'Réglages')) : null;
+}
+
 function errorBanner() {
   const errs = (S.status && S.status.errors) || {};
   const lines = [];
@@ -535,6 +547,7 @@ function viewAgenda() {
     'div',
     { class: 'page' },
     errorBanner(),
+    staleBanner(),
     h('div', { class: 'hello' }, h('h1', null, name ? `Salut ${name} !` : 'Salut !'), h('p', null, cap(fmtLong.format(Date.now())))),
     summary(),
     toolbar(),
@@ -770,7 +783,7 @@ function moodleSection() {
   const urlInput = h('input', {
     type: 'url',
     id: 'moodle-url',
-    placeholder: 'ex. moodle.univ-ville.fr',
+    placeholder: `ex. moodle-lettres-${academicYearSuffix()}.sorbonne-universite.fr`,
     value: S.moodleUrl ?? m.baseUrl,
     oninput: (e) => (S.moodleUrl = e.target.value),
   });
@@ -819,7 +832,7 @@ function moodleSection() {
           'Vérifier'
         )
       ),
-      'Copie l’adresse affichée dans ton navigateur quand tu es sur Moodle.'
+      `Copie l’adresse affichée dans ton navigateur quand tu es sur Moodle. À Sorbonne Université, elle change chaque année : cette année c’est moodle-lettres-${academicYearSuffix()} (Lettres) ou moodle-sciences-${academicYearSuffix()} (Sciences).`
     ),
     check ? h('p', { class: 'connected' }, icon('check'), `Trouvé : ${check.siteName || check.baseUrl}`) : null,
     h(
@@ -850,117 +863,221 @@ function moodleSection() {
   );
 }
 
-const MAIL_HELP = {
-  custom:
-    'Messagerie de l’université : cherche « IMAP » dans l’aide de ta messagerie ou sur le site de la DSI (adresse du serveur, en général port 993 avec SSL).',
-  gmail: 'Gmail : active la validation en deux étapes puis crée un « mot de passe d’application » (myaccount.google.com/apppasswords) et colle-le ici.',
-  outlook:
-    'Microsoft 365 / Outlook : beaucoup d’universités bloquent la connexion IMAP par mot de passe. Si le test échoue, transfère automatiquement tes mails universitaires vers une adresse Gmail et connecte ce Gmail.',
-  yahoo: 'Yahoo : crée un mot de passe d’application dans la sécurité du compte.',
-  orange: 'Orange : utilise ton adresse complète et ton mot de passe de messagerie.',
-  free: 'Free : utilise ton adresse complète et ton mot de passe de messagerie.',
-  laposte: 'La Poste : utilise ton adresse complète et ton mot de passe.',
-};
-
 function mailSection() {
   const m = S.settings.mail;
-  const preset = h(
-    'select',
-    {
-      id: 'mail-preset',
-      onchange: (e) => {
-        const p = S.presets[e.target.value];
-        if (p) {
-          document.getElementById('mail-host').value = p.host;
-          document.getElementById('mail-port').value = p.port;
-          document.getElementById('mail-secure').checked = p.secure;
-        }
-        document.getElementById('mail-help').textContent = MAIL_HELP[e.target.value] || MAIL_HELP.custom;
-      },
-    },
-    [
-      ['custom', 'Messagerie de l’université / autre'],
-      ['gmail', 'Gmail'],
-      ['outlook', 'Outlook / Microsoft 365'],
-      ['yahoo', 'Yahoo'],
-      ['orange', 'Orange'],
-      ['free', 'Free'],
-      ['laposte', 'La Poste'],
-    ].map(([v, l]) => h('option', { value: v, selected: m.preset === v ? true : null }, l))
-  );
-  const readForm = () => ({
-    enabled: document.getElementById('mail-enabled').checked,
-    preset: document.getElementById('mail-preset').value,
-    host: document.getElementById('mail-host').value.trim(),
-    port: Number(document.getElementById('mail-port').value) || 993,
-    secure: document.getElementById('mail-secure').checked,
-    user: document.getElementById('mail-user').value.trim(),
-    password: document.getElementById('mail-pass').value,
-    mailboxes: document
-      .getElementById('mail-boxes')
-      .value.split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    sinceDays: Number(document.getElementById('mail-days').value) || 30,
-    senderFilter: document.getElementById('mail-filter').value.trim(),
-  });
+  const connected = m.enabled && m.host && m.hasPassword;
+  const val = (id) => document.getElementById(id).value.trim();
+  const readForm = () => {
+    const email = val('mail-email');
+    return {
+      email,
+      user: val('mail-login') || email,
+      host: val('mail-host'),
+      port: Number(val('mail-port')) || 993,
+      secure: document.getElementById('mail-secure').checked,
+      password: document.getElementById('mail-pass').value,
+      mailboxes: val('mail-boxes')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+      sinceDays: Number(val('mail-days')) || 30,
+      senderFilter: val('mail-filter'),
+    };
+  };
+  const setStatus = (text, kind = '') => {
+    const el = document.getElementById('mail-status');
+    el.className = `help ${kind}`;
+    el.textContent = text;
+  };
+
+  const connect = async (e) => {
+    const btn = e.currentTarget;
+    const email = val('mail-email');
+    if (!email) return toast('Indique ton adresse mail.', 'error');
+    btn.disabled = true;
+    try {
+      let provider = m.provider;
+      let note = '';
+      // Find the server from the address, unless the advanced settings were filled in by hand.
+      if (!document.getElementById('mail-advanced').open || !val('mail-host')) {
+        setStatus('Recherche du serveur de ta messagerie…');
+        const found = await api.mailDetect(email);
+        document.getElementById('mail-host').value = found.host;
+        document.getElementById('mail-port').value = found.port;
+        document.getElementById('mail-secure').checked = found.secure;
+        provider = found.provider;
+        note = found.note || '';
+      }
+      const cfg = readForm();
+      if (!cfg.password && !m.hasPassword) {
+        setStatus('Indique ton mot de passe.', 'warn');
+        return;
+      }
+      setStatus(`Connexion à ${cfg.host}…`);
+      let res;
+      try {
+        res = await api.mailTest(cfg);
+      } catch (err) {
+        setStatus(`${err.message}${note ? ` ${note}` : ''}`, 'warn');
+        return;
+      }
+      const s = await api.saveSettings({ mail: { ...cfg, enabled: true, provider } });
+      S.settings = s;
+      const total = res.reduce((n, b) => n + (b.messages || 0), 0);
+      toast(`Boîte mail connectée (${total} messages). Analyse en cours…`, 'ok');
+      render();
+    } catch (err) {
+      setStatus(err.message, 'warn');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
   return h(
     'section',
     { class: 'panel' },
     h('h2', null, 'Mails'),
-    h(
-      'label',
-      { class: 'switch-row' },
-      h('input', { type: 'checkbox', class: 'switch', id: 'mail-enabled', checked: m.enabled }),
-      h('span', null, h('span', { class: 'switch-label' }, 'Lire ma boîte mail'), h('span', { class: 'help' }, 'Les mails restent sur ton ordinateur ; rien n’est modifié ni supprimé dans ta boîte.'))
-    ),
+    connected
+      ? h(
+          'p',
+          { class: 'connected' },
+          icon('check'),
+          'Boîte connectée : ',
+          h('strong', null, m.email || m.user),
+          m.provider ? ` (${m.provider})` : ''
+        )
+      : h('p', { class: 'help' }, 'Mets juste ton adresse et ton mot de passe : l’appli trouve toute seule le serveur de ta messagerie. Les mails restent sur ton ordinateur, rien n’est modifié dans ta boîte.'),
     h(
       'div',
       { class: 'grid2' },
-      field('Fournisseur', preset),
-      field('Adresse e-mail / identifiant', h('input', { type: 'text', id: 'mail-user', value: m.user, autocomplete: 'username' })),
-      field('Serveur IMAP', h('input', { type: 'text', id: 'mail-host', value: m.host, placeholder: 'imap.exemple.fr' })),
-      field(
-        'Port',
-        h(
-          'div',
-          { class: 'inline' },
-          h('input', { type: 'number', id: 'mail-port', value: m.port, min: '1', max: '65535', class: 'short' }),
-          h('label', { class: 'toggle' }, h('input', { type: 'checkbox', id: 'mail-secure', checked: m.secure }), 'SSL/TLS')
-        )
-      ),
-      field('Mot de passe', h('input', { type: 'password', id: 'mail-pass', placeholder: m.hasPassword ? '•••••••• (enregistré)' : '', autocomplete: 'current-password' })),
-      field('Dossiers à lire', h('input', { type: 'text', id: 'mail-boxes', value: (m.mailboxes || ['INBOX']).join(', ') }), 'Séparés par des virgules. INBOX = boîte de réception.'),
-      field('Période', h('select', { id: 'mail-days' }, [14, 30, 60, 90].map((d) => h('option', { value: d, selected: Number(m.sinceDays) === d ? true : null }, `${d} derniers jours`)))),
-      field(
-        'Ne garder que les expéditeurs contenant',
-        h('input', { type: 'text', id: 'mail-filter', value: m.senderFilter, placeholder: 'ex. univ-ville.fr, moodle' }),
-        'Optionnel. Laisse vide pour analyser tous les mails.'
-      )
+      field('Ton adresse mail', h('input', { type: 'email', id: 'mail-email', value: m.email || m.user, placeholder: 'prenom.nom@etu.sorbonne-universite.fr', autocomplete: 'username' })),
+      field('Mot de passe', h('input', { type: 'password', id: 'mail-pass', placeholder: m.hasPassword ? '•••••••• (enregistré)' : 'celui de ta messagerie / ENT', autocomplete: 'current-password' }))
     ),
-    h('p', { class: 'help', id: 'mail-help' }, MAIL_HELP[m.preset] || MAIL_HELP.custom),
+    h('p', { class: 'help', id: 'mail-status' }, connected ? `Serveur : ${m.host}` : ''),
     h(
       'div',
       { class: 'actions' },
+      h('button', { type: 'button', class: 'btn primary', onclick: connect }, connected ? 'Reconnecter' : 'Se connecter'),
+      connected
+        ? h('button', { type: 'button', class: 'btn', onclick: () => saveSettings({ mail: { enabled: false } }, 'Boîte mail déconnectée') }, 'Déconnecter')
+        : null
+    ),
+    h(
+      'details',
+      { class: 'advanced', id: 'mail-advanced' },
+      h('summary', null, 'Réglages avancés'),
       h(
-        'button',
-        {
-          type: 'button',
-          class: 'btn',
-          onclick: async (e) => {
-            const btn = e.currentTarget;
-            btn.disabled = true;
-            btn.textContent = 'Test en cours…';
-            const res = await guarded(() => api.mailTest(readForm()));
-            btn.disabled = false;
-            btn.textContent = 'Tester la connexion';
-            if (res) toast(`Connexion réussie : ${res.map((b) => `${b.mailbox} (${b.messages} messages)`).join(', ')}`, 'ok');
-          },
-        },
-        'Tester la connexion'
+        'div',
+        { class: 'grid2' },
+        field('Identifiant de connexion', h('input', { type: 'text', id: 'mail-login', value: m.user && m.user !== m.email ? m.user : '' }), 'Seulement s’il est différent de ton adresse (par exemple ton identifiant ENT).'),
+        field('Serveur IMAP', h('input', { type: 'text', id: 'mail-host', value: m.host, placeholder: 'trouvé automatiquement' })),
+        field(
+          'Port',
+          h(
+            'div',
+            { class: 'inline' },
+            h('input', { type: 'number', id: 'mail-port', value: m.port, min: '1', max: '65535', class: 'short' }),
+            h('label', { class: 'toggle' }, h('input', { type: 'checkbox', id: 'mail-secure', checked: m.secure }), 'SSL/TLS')
+          )
+        ),
+        field('Dossiers à lire', h('input', { type: 'text', id: 'mail-boxes', value: (m.mailboxes || ['INBOX']).join(', ') }), 'Séparés par des virgules. INBOX = boîte de réception.'),
+        field('Période', h('select', { id: 'mail-days' }, [14, 30, 60, 90].map((d) => h('option', { value: d, selected: Number(m.sinceDays) === d ? true : null }, `${d} derniers jours`)))),
+        field('Ne garder que les expéditeurs contenant', h('input', { type: 'text', id: 'mail-filter', value: m.senderFilter, placeholder: 'ex. sorbonne-universite.fr, moodle' }), 'Optionnel.')
       ),
-      h('button', { type: 'button', class: 'btn primary', onclick: () => saveSettings({ mail: readForm() }, 'Réglages mail enregistrés') }, 'Enregistrer')
+      h('div', { class: 'actions' }, h('button', { type: 'button', class: 'btn', onclick: () => saveSettings({ mail: readForm() }, 'Réglages mail enregistrés') }, 'Enregistrer ces réglages'))
     )
+  );
+}
+
+function calendarsSection() {
+  const list = S.settings.calendars || [];
+  const url = h('input', { type: 'url', id: 'cal-url', placeholder: 'https://…/calendar.ics ou webcal://…' });
+  const name = h('input', { type: 'text', id: 'cal-name', placeholder: 'Nom (ex. Emploi du temps L2)', class: 'cal-name' });
+  const add = async (e) => {
+    const link = url.value.trim();
+    if (!link) return toast('Colle le lien du calendrier.', 'error');
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const res = await guarded(() => api.calendarTest(link));
+    btn.disabled = false;
+    if (!res) return;
+    toast(`Calendrier ajouté : ${res.upcoming} événements à venir, dont ${res.exams} examen(s) ou rendu(s).`, 'ok');
+    await saveSettings({ calendars: [...list, { url: link, name: name.value.trim() || 'Calendrier', all: false }] }, null);
+  };
+  const update = (i, patch) => saveSettings({ calendars: list.map((c, j) => (j === i ? { ...c, ...patch } : c)) }, null);
+  return h(
+    'section',
+    { class: 'panel' },
+    h('h2', null, 'Emploi du temps et calendriers (optionnel)'),
+    h(
+      'p',
+      { class: 'help' },
+      'Si ta fac publie ton emploi du temps ou tes examens dans un agenda en ligne (ADE, ENT, Google Agenda…), copie son lien d’abonnement (.ics / « exporter » / « s’abonner ») et colle-le ici. L’appli n’en garde que les examens et les rendus, sauf si tu coches « tout afficher ».'
+    ),
+    list.map((c, i) =>
+      h(
+        'div',
+        { class: 'cal-row' },
+        h('div', { class: 'cal-info' }, h('strong', null, c.name || 'Calendrier'), h('span', { class: 'help' }, c.url)),
+        h('label', { class: 'toggle' }, h('input', { type: 'checkbox', checked: c.all, onchange: (e) => update(i, { all: e.target.checked }) }), 'tout afficher'),
+        h('button', { type: 'button', class: 'btn small', onclick: () => saveSettings({ calendars: list.filter((_, j) => j !== i) }, 'Calendrier retiré') }, 'Retirer')
+      )
+    ),
+    h('div', { class: 'inline' }, url, name, h('button', { type: 'button', class: 'btn', onclick: add }, 'Ajouter'))
+  );
+}
+
+/** Sorbonne-style Moodles change address every year (moodle-lettres-25 → moodle-lettres-26). */
+function staleMoodleWarning() {
+  const st = S.agenda && S.agenda.stats && S.agenda.stats.moodle;
+  if (!st) return null;
+  const now = new Date();
+  const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+  // Year the site's academic year starts: "2025-2026" → 2025, "moodle-lettres-25" → 2025, "Sciences 2026" → 2026.
+  const site = String(st.site || '');
+  const range = /(20\d\d)\s*[-/–]\s*(20\d\d)/.exec(site);
+  const m = /moodle-([a-z]+)-(\d\d)\./i.exec(st.url || '');
+  const single = site.match(/20\d\d/g);
+  const siteYear = range ? Number(range[1]) : m ? 2000 + Number(m[2]) : single ? Math.max(...single.map(Number)) : null;
+  if (!siteYear || siteYear >= startYear) return null;
+  const better = m ? st.url.replace(/-(\d\d)\./, `-${String(startYear % 100).padStart(2, '0')}.`) : '';
+  return `Ton Moodle « ${st.site} » semble être celui d’une année passée : les cours et examens de cette année n’y sont pas.${better ? ` Connecte plutôt ${better}` : ''}`;
+}
+
+function diagnosticsSection() {
+  const st = (S.agenda && S.agenda.stats) || null;
+  const line = (label, value, kind = '') => h('li', { class: kind }, h('span', { class: 'diag-label' }, label), h('span', null, value));
+  const rows = [];
+  const m = st && st.moodle;
+  if (m) {
+    rows.push(line('Moodle', `${m.site} — ${m.courses} cours suivis${m.hiddenCourses ? ` (+${m.hiddenCourses} masqués)` : ''}`));
+    rows.push(line('', `${m.calendarEvents} événements du calendrier, ${m.assignments} devoirs, ${m.announcements} annonces, ${m.pages} textes de pages de cours, ${m.files} documents`));
+    for (const w of m.warnings.slice(0, 3)) rows.push(line('', w, 'warn'));
+  } else {
+    rows.push(line('Moodle', S.settings.moodle.hasToken ? 'pas encore synchronisé' : 'non connecté', 'warn'));
+  }
+  if (S.settings.mail.enabled) rows.push(line('Mails', st ? `${st.mails.total} mails lus, dont ${st.mails.withDates} avec une date d’examen, de rendu ou de cours` : '—'));
+  else rows.push(line('Mails', 'boîte mail non connectée', 'warn'));
+  if (st && st.calendars.length) {
+    for (const c of st.calendars) rows.push(line('Calendrier', `${c.name} : ${c.events} événements${c.error ? ` — ${c.error}` : ''}`, c.error ? 'warn' : ''));
+  }
+  if (st) rows.push(line('À venir', `${st.upcoming.exam} examen(s) / test(s), ${st.upcoming.deadline} rendu(s), ${st.upcoming.info} info(s)`));
+  const stale = staleMoodleWarning();
+  return h(
+    'section',
+    { class: 'panel', id: 'diagnostics' },
+    h('h2', null, 'Ce que l’appli a vérifié'),
+    S.status.lastSync ? h('p', { class: 'help' }, `Dernière synchronisation ${ago(S.status.lastSync)}.`) : null,
+    h('ul', { class: 'diag' }, rows),
+    stale ? h('p', { class: 'help warn' }, stale) : null,
+    st && st.upcoming.exam === 0
+      ? h(
+          'p',
+          { class: 'help' },
+          'Aucun examen trouvé pour l’instant. Les dates d’examen ne sont pas toujours sur Moodle : connecte ta boîte mail universitaire (les convocations et annonces y arrivent souvent) et, si ta fac en propose un, ajoute le lien de ton emploi du temps ci-dessous.'
+        )
+      : null,
+    h('div', { class: 'actions' }, h('button', { type: 'button', class: 'btn', disabled: S.status.state === 'running', onclick: () => guarded(() => api.syncNow()) }, icon('sync'), 'Tout revérifier maintenant'))
   );
 }
 
@@ -1042,8 +1159,10 @@ function viewSettings() {
     { class: 'page' },
     h('div', { class: 'hello' }, h('h1', null, 'Réglages')),
     errorBanner(),
+    isConfigured() ? diagnosticsSection() : null,
     moodleSection(),
     mailSection(),
+    calendarsSection(),
     aiSection(),
     generalSection()
   );
@@ -1149,14 +1268,21 @@ async function boot() {
   S.version = init.version;
   if (!isConfigured()) S.view = 'agenda';
 
+  // In the settings, only the "what was checked" panel is refreshed, so forms being typed are kept.
+  const refreshDiagnostics = () => {
+    const el = document.getElementById('diagnostics');
+    if (el) el.replaceWith(diagnosticsSection());
+  };
   api.onData((agenda) => {
     S.agenda = agenda;
     if (S.view !== 'settings') render();
+    else refreshDiagnostics();
   });
   api.onStatus((status) => {
     S.status = status;
     renderTopbar();
     if (status.state !== 'running' && S.view !== 'settings') render();
+    else if (S.view === 'settings') refreshDiagnostics();
   });
   api.onFocusItem((id) => {
     S.view = 'agenda';
