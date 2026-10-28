@@ -2,13 +2,18 @@
 
 // Login through the university's web page (ENT / CAS / Shibboleth), exactly like the
 // official Moodle app: open admin/tool/mobile/launch.php, let the student log in, then
-// catch the "moodlemobile://token=…" redirect that carries the app token.
+// catch the "<scheme>://token=…" redirect that carries the app token.
 
 const crypto = require('crypto');
 const { BrowserWindow, session } = require('electron');
 const { parseLaunchToken } = require('./moodle');
 
 const SCHEME = 'moodlemobile';
+// Universities with their own branded app replace "moodlemobile" by their own scheme
+// (Moodle setting "forcedurlscheme"), so any custom scheme followed by "token=" is accepted.
+const TOKEN_URL_RE = /^([a-z][a-z0-9+.-]*):\/\/token=/i;
+const NOT_APP_SCHEMES = /^(https?|file|data|about|blob|javascript|chrome|devtools|ws|wss)$/i;
+const LAUNCH_PATH = '/admin/tool/mobile/launch.php';
 
 function md5(s) {
   return crypto.createHash('md5').update(s).digest('hex');
@@ -25,6 +30,8 @@ function ssoLogin(cfg, parent) {
   launch.searchParams.set('service', 'moodle_mobile_app');
   launch.searchParams.set('passport', passport);
   launch.searchParams.set('urlscheme', SCHEME);
+  const site = new URL(cfg.baseUrl);
+  const sitePath = site.pathname.replace(/\/$/, '');
 
   // A fresh in-memory session: Moodle only hands out the token right after a real login.
   const partition = `sso-${Date.now()}`;
@@ -42,6 +49,10 @@ function ssoLogin(cfg, parent) {
 
   return new Promise((resolve, reject) => {
     let finished = false;
+    let lastUrl = '';
+    let loginPageTried = false;
+    let relaunches = 0;
+
     const finish = (err, value) => {
       if (finished) return;
       finished = true;
@@ -52,7 +63,8 @@ function ssoLogin(cfg, parent) {
     };
 
     const tryUrl = (url) => {
-      if (!url || !url.toLowerCase().startsWith(`${SCHEME}://`)) return false;
+      const m = TOKEN_URL_RE.exec(url || '');
+      if (!m || NOT_APP_SCHEMES.test(m[1])) return false;
       const parsed = parseLaunchToken(url);
       if (!parsed) {
         finish(new Error('Réponse de Moodle illisible.'));
@@ -67,6 +79,17 @@ function ssoLogin(cfg, parent) {
       return true;
     };
 
+    const onSite = (url) => {
+      try {
+        const u = new URL(url);
+        return u.host === site.host && u.pathname.startsWith(sitePath + '/');
+      } catch {
+        return false;
+      }
+    };
+
+    const run = (js, fallback) => win.webContents.executeJavaScript(js).catch(() => fallback);
+
     const guard = (event, url) => {
       if (tryUrl(url)) event.preventDefault();
     };
@@ -76,20 +99,47 @@ function ssoLogin(cfg, parent) {
       if (tryUrl(details.url)) details.preventDefault();
     });
     win.webContents.on('did-fail-load', (_e, _code, _desc, url) => tryUrl(url));
-    // If launch.php itself shows an error (site only allows in-app login), say so instead of leaving an error page open.
+    win.webContents.on('did-navigate', (_e, url) => {
+      lastUrl = url;
+    });
+
     win.webContents.on('did-finish-load', async () => {
-      if (finished || !win.webContents.getURL().includes('/admin/tool/mobile/launch.php')) return;
-      const error = await win.webContents
-        .executeJavaScript("(document.querySelector('#launchapp') ? '' : ((document.querySelector('.errorbox, .alert-danger, .errormessage') || {}).textContent || ''))")
-        .catch(() => '');
-      if (error && error.trim()) {
+      if (finished) return;
+      const url = win.webContents.getURL();
+      if (!onSite(url)) return;
+      const path = new URL(url).pathname;
+
+      if (path.endsWith(LAUNCH_PATH)) {
+        const error = await run(
+          "(document.querySelector('#launchapp') ? '' : ((document.querySelector('.errorbox, .alert-danger, .errormessage') || {}).textContent || ''))",
+          ''
+        );
+        if (!error || !error.trim() || finished) return;
+        // Sites set to "log in inside the app" refuse launch.php until the user has just logged in:
+        // send the window to the login page; Moodle comes back to launch.php right after the login.
+        if (!loginPageTried) {
+          loginPageTried = true;
+          win.loadURL(`${cfg.baseUrl}/login/index.php`).catch(() => {});
+          return;
+        }
         finish(
           new Error(
-            `Ce Moodle n'autorise pas la connexion par la page de l'université (« ${error.trim().slice(0, 120)} »). Utilise ton identifiant et ton mot de passe Moodle, ou un jeton.`
+            `Moodle refuse de donner l'accès à l'appli (« ${error.trim().slice(0, 160)} »). Essaie avec ton identifiant et ton mot de passe Moodle, ou avec un jeton.`
           )
         );
+        return;
+      }
+
+      // Logged in but left on another Moodle page (dashboard…): ask for the token again.
+      if (!/\/login\//.test(path) && relaunches < 2) {
+        const userId = Number(await run('(window.M && M.cfg && M.cfg.userId) || 0', 0));
+        if (userId > 0 && !finished) {
+          relaunches++;
+          win.loadURL(launch.toString()).catch(() => {});
+        }
       }
     });
+
     win.webContents.setWindowOpenHandler(({ url }) => {
       tryUrl(url);
       return { action: 'deny' };
@@ -99,9 +149,16 @@ function ssoLogin(cfg, parent) {
       if (permission === 'openExternal' && details && tryUrl(details.externalURL)) return callback(false);
       callback(false);
     });
-    win.on('closed', () => finish(new Error('Fenêtre de connexion fermée.')));
+    win.on('closed', () => {
+      let where = '';
+      try {
+        const u = new URL(lastUrl);
+        where = ` Dernière page : ${u.host}${u.pathname}.`;
+      } catch {}
+      finish(new Error(`La connexion n'a pas abouti (fenêtre fermée avant la fin).${where}`));
+    });
     win.loadURL(launch.toString()).catch(() => {});
   });
 }
 
-module.exports = { ssoLogin };
+module.exports = { ssoLogin, TOKEN_URL_RE };

@@ -121,7 +121,14 @@ class MoodleClient {
     }
     const data = await res.json().catch(() => ({}));
     if (!data.token) {
-      throw new MoodleError(data.error || 'Connexion refusée par Moodle.', data.errorcode || 'loginfailed');
+      if (data.errorcode === 'invalidlogin') {
+        throw new MoodleError(
+          "Moodle refuse cet identifiant ou ce mot de passe. Si tu te connectes d'habitude par l'ENT / CAS de ta fac, ton compte Moodle n'a pas de mot de passe propre : utilise plutôt « Se connecter » avec la page de l'université.",
+          data.errorcode
+        );
+      }
+      const detail = data.errorcode ? ` (code : ${data.errorcode})` : '';
+      throw new MoodleError(`${data.error || 'Connexion refusée par Moodle.'}${detail}`, data.errorcode || 'loginfailed');
     }
     return { token: data.token, privateToken: data.privatetoken || null };
   }
